@@ -85,6 +85,7 @@ pipeline {
                     // GIT REMOTE
                     bat "git remote set-url origin https://${GIT_USERNAME}:${GITHUB_CREDENTIALS}@github.com/${GIT_USERNAME}/${GIT_REPO}.git"
                     bat "git checkout main"
+                    bat "git pull"
                     
                     // CHANGE THE IMAGE TAG IN THE DEPLOYMENT YAML TO THE NEW TAG
                     powershell """
@@ -110,5 +111,5 @@ pipeline {
             }
         }
     }
-
+}
 

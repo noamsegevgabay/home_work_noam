@@ -1,0 +1,114 @@
+pipeline {
+    agent any
+
+    environment {
+        
+        // DOCKER information
+        DOCKER_REGISTRY = 'noamsegevgabay'
+        DOCKER_IMAGE_NAME = 'home_work_noam'
+        DOCKER_CREDENTIALS_ID = "docker-credentials"
+        DOCKER_IMAGE_TAG = "${env.BUILD_NUMBER}"  // Using the Jenkins build number as the image tag
+        
+        // KUBERNETES CREDENTIAL
+        KUBECONFIG_CREDENTIAL = credentials('kubeconfig-credential')
+        
+        // GIT CREDENTIALS
+        GITHUB_CREDENTIALS = credentials('git-token')
+        GIT_USERNAME = 'noamsegevgabay'
+        GIT_REPO = 'home_work_noam'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                script{
+                    
+                    // CHECKOUT REPO
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: '*/main']],
+                        userRemoteConfigs: [[
+                            url: 'https://github.com/noamsegevgabay/home_work_noam.git',
+                            credentialsId: GITHUB_CREDENTIALS
+    ]]
+])
+
+                }
+            
+            }
+        }
+    
+        stage('Build') {
+            steps {
+                script {
+
+                    // BUILD THE IMAGE
+                    bat "docker build -t ${DOCKER_REGISTRY}/${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG} ."
+                }
+            }
+        }
+
+        stage('Push') {
+            steps {
+                script {
+                    
+                    // LOGIN TO DOCKERHUB
+                    withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
+                        bat "docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD}"
+                    }
+                    
+                   // PUSH IMAGE
+                    bat "docker push ${DOCKER_REGISTRY}/${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}"
+                    
+                    // CHECK IF THERE IS LATEST TAG IN DOCKERHUB, AND DELETE IF EXIST
+                    def latestTagExists = bat(
+                        script: "docker image inspect ${DOCKER_REGISTRY}/${DOCKER_IMAGE_NAME}:latest",
+                        returnStatus: true
+                    ) == 0
+                    
+                    if (latestTagExists) {
+                        bat "docker image rm ${DOCKER_REGISTRY}/${DOCKER_IMAGE_NAME}:latest"
+                    }
+                    
+                    // TAG THE NEW IMAGE AS LATEST AND PUSH
+                    bat "docker tag ${DOCKER_REGISTRY}/${DOCKER_IMAGE_NAME}:${BUILD_NUMBER} ${DOCKER_REGISTRY}/${DOCKER_IMAGE_NAME}:latest"
+                    bat "docker push ${DOCKER_REGISTRY}/${DOCKER_IMAGE_NAME}:latest"
+                }
+            }
+        }
+        
+        stage('Deploy') {
+            steps {
+
+                script {
+                    
+                    // GIT REMOTE
+                    bat "git remote set-url origin https://${GIT_USERNAME}:${GITHUB_CREDENTIALS}@github.com/${GIT_USERNAME}/${GIT_REPO}.git"
+                    bat "git checkout main"
+                    
+                    // CHANGE THE IMAGE TAG IN THE DEPLOYMENT YAML TO THE NEW TAG
+                    powershell """
+                    (Get-Content -Path yamls/deployment.yaml -Raw) -replace 'image: ${DOCKER_REGISTRY}/${DOCKER_IMAGE_NAME}:.*', "image: ${DOCKER_REGISTRY}/${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}" | Set-Content -Path yamls/deployment.yaml
+                
+                    """
+                    
+                  // CONNECT TO THE CLUSTER AND APPLY THE CHANGE
+                    withCredentials([file(credentialsId: 'kubeconfig-credential', variable: 'KUBECONFIG_FILE')]) {
+                        bat "kubectl --kubeconfig=$KUBECONFIG_FILE apply -f yamls/deployment.yaml"
+                        bat "kubectl get pods --kubeconfig=$KUBECONFIG_FILE -n homework"
+                    }
+                    
+                    bat 'git config --global user.email "gnoam1@gmail.com"'
+                    bat 'git config --global user.name ${GIT_USERNAME}'
+                    bat "git add ."
+                    bat 'git commit -m "Commit message"'
+                    bat "git checkout main"
+                    bat "git push -u origin main"
+
+                    
+                }
+            }
+        }
+    }
+
+

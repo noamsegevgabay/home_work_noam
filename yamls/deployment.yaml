@@ -15,9 +15,10 @@ spec:
     spec:
       containers:
       - name: homework
-        image: noamsegevgabay/home_work_noam:22
+        image: noamsegevgabay/home_work_noam:23
         ports:
         - containerPort: 8080
+
 
 
 
